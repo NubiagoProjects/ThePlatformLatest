@@ -1,0 +1,165 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: nubiago-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nubiago_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-secure_password_change_in_production}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - nubiago-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nubiago_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: nubiago-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password_change_in_production}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - nubiago-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nubiago API Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: nubiago-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgresql://postgres:${DATABASE_PASSWORD:-secure_password_change_in_production}@postgres:5432/nubiago_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password_change_in_production}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-your-super-secret-refresh-key-change-in-production}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      # Supabase Configuration
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # File Upload Configuration
+      UPLOAD_PROVIDER: ${UPLOAD_PROVIDER:-supabase}
+      MAX_FILE_SIZE: 10485760
+      # Email Configuration
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_PASS: ${EMAIL_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-noreply@nubiago.com}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    networks:
+      - nubiago-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx Reverse Proxy (optional, for production)
+  nginx:
+    image: nginx:alpine
+    container_name: nubiago-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - nubiago-network
+    profiles:
+      - production
+
+  # PostgreSQL Admin (optional, for development)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: nubiago-pgadmin
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@nubiago.com
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_password_change_in_production}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - nubiago-network
+    profiles:
+      - development
+
+  # Redis Commander (optional, for development)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: nubiago-redis-commander
+    restart: unless-stopped
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:${REDIS_PASSWORD:-redis_password_change_in_production}
+    ports:
+      - "8081:8081"
+    networks:
+      - nubiago-network
+    profiles:
+      - development
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  nubiago-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 

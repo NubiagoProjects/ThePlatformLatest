@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+    
+    function isSupplier() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPLIER';
+    }
+    
+    function isActiveUser() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    // Products collection
+    match /products/{productId} {
+      allow read: if true; // Public read access
+      allow create: if isAuthenticated() && isActiveUser() && isSupplier();
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (isSupplier() && resource.data.supplierId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        (isSupplier() && resource.data.supplierId == request.auth.uid || isAdmin());
+    }
+
+    // Categories collection
+    match /categories/{categoryId} {
+      allow read: if true; // Public read access
+      allow create, update, delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Orders collection
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isActiveUser();
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Order items collection
+    match /orderItems/{itemId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isActiveUser();
+      allow update: if isAuthenticated() && isActiveUser() && isAdmin();
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Addresses collection
+    match /addresses/{addressId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Reviews collection
+    match /reviews/{reviewId} {
+      allow read: if true; // Public read access for approved reviews
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Cart items collection
+    match /cartItems/{itemId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+    }
+
+    // Wishlist items collection
+    match /wishlistItems/{itemId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        resource.data.userId == request.auth.uid;
+    }
+
+    // Supplier profiles collection
+    match /supplierProfiles/{profileId} {
+      allow read: if true; // Public read access
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Payment intents collection
+    match /paymentIntents/{intentId} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isActiveUser() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Webhook logs collection
+    match /webhookLogs/{logId} {
+      allow read: if isAuthenticated() && isActiveUser() && isAdmin();
+      allow create: if true; // Allow webhook creation
+      allow update: if isAuthenticated() && isActiveUser() && isAdmin();
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+  }
+} 

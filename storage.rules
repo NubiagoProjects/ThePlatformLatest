@@ -1,0 +1,96 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+    
+    function isSupplier() {
+      return isAuthenticated() && 
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'SUPPLIER';
+    }
+    
+    function isActiveUser() {
+      return isAuthenticated() && 
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*') &&
+             request.resource.size < 5 * 1024 * 1024; // 5MB limit
+    }
+    
+    function isValidDocument() {
+      return request.resource.contentType.matches('application/pdf') &&
+             request.resource.size < 10 * 1024 * 1024; // 10MB limit
+    }
+
+    // Product images
+    match /products/{productId}/{fileName} {
+      allow read: if true; // Public read access
+      allow write: if isAuthenticated() && isActiveUser() && 
+        (isSupplier() || isAdmin()) && isValidImage();
+    }
+
+    // User avatars
+    match /avatars/{userId}/{fileName} {
+      allow read: if true; // Public read access
+      allow write: if isAuthenticated() && isActiveUser() && 
+        isOwner(userId) && isValidImage();
+    }
+
+    // Category images
+    match /categories/{categoryId}/{fileName} {
+      allow read: if true; // Public read access
+      allow write: if isAuthenticated() && isActiveUser() && 
+        isAdmin() && isValidImage();
+    }
+
+    // Supplier logos
+    match /suppliers/{supplierId}/{fileName} {
+      allow read: if true; // Public read access
+      allow write: if isAuthenticated() && isActiveUser() && 
+        (isOwner(supplierId) || isAdmin()) && isValidImage();
+    }
+
+    // Documents (invoices, receipts, etc.)
+    match /documents/{userId}/{fileName} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        (isOwner(userId) || isAdmin());
+      allow write: if isAuthenticated() && isActiveUser() && 
+        isOwner(userId) && isValidDocument();
+    }
+
+    // Temporary uploads
+    match /temp/{userId}/{fileName} {
+      allow read: if isAuthenticated() && isActiveUser() && 
+        isOwner(userId);
+      allow write: if isAuthenticated() && isActiveUser() && 
+        isOwner(userId) && (isValidImage() || isValidDocument());
+      allow delete: if isAuthenticated() && isActiveUser() && 
+        isOwner(userId);
+    }
+
+    // Admin uploads
+    match /admin/{fileName} {
+      allow read: if isAuthenticated() && isActiveUser() && isAdmin();
+      allow write: if isAuthenticated() && isActiveUser() && isAdmin();
+      allow delete: if isAuthenticated() && isActiveUser() && isAdmin();
+    }
+
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+} 
